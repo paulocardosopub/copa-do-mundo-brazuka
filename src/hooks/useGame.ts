@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   advanceMatch,
+  applyRecoveryOption,
   buyEquipment,
+  calculateBaseOvr,
   calculateOvr,
   claimMissionReward,
   clearFinishedMatch,
@@ -14,6 +16,8 @@ import {
   skipMatch,
   startMatch,
   trainAttribute,
+  trainDrill,
+  upgradeEquipment,
   upgradeSkill,
   applyMatchSkill,
 } from '../utils/gameLogic'
@@ -36,12 +40,13 @@ export function useGame() {
     if (state.activeMatch?.status !== 'running') return
     const timer = window.setInterval(() => {
       setState((current) => advanceMatch(current))
-    }, 1250)
+    }, 280)
 
     return () => window.clearInterval(timer)
   }, [state.activeMatch?.status, state.activeMatch?.id])
 
   const ovr = useMemo(() => calculateOvr(state), [state])
+  const baseOvr = useMemo(() => calculateBaseOvr(state), [state])
 
   const actions = useMemo(
     () => ({
@@ -51,8 +56,14 @@ export function useGame() {
       train(key: AttributeKey, times: number | 'max') {
         setState((current) => trainAttribute(current, key, times))
       },
+      trainDrill(drillId: string) {
+        setState((current) => trainDrill(current, drillId))
+      },
       rest() {
         setState((current) => restPlayer(current))
+      },
+      recover(optionId: string) {
+        setState((current) => applyRecoveryOption(current, optionId))
       },
       startMatch(strategy: StrategyKey) {
         setState((current) => startMatch(current, strategy))
@@ -71,6 +82,9 @@ export function useGame() {
       },
       equipItem(itemId: string) {
         setState((current) => equipItem(current, itemId))
+      },
+      upgradeEquipment(itemId: string) {
+        setState((current) => upgradeEquipment(current, itemId))
       },
       signSponsor(sponsorId: string) {
         setState((current) => signSponsor(current, sponsorId))
@@ -114,5 +128,5 @@ export function useGame() {
     setState(next)
   }, [])
 
-  return { state, ovr, actions, setState: setStateSafely }
+  return { state, ovr, baseOvr, actions, setState: setStateSafely }
 }

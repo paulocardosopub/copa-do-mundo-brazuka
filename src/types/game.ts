@@ -4,6 +4,7 @@ export type Screen =
   | 'match'
   | 'career'
   | 'player'
+  | 'recovery'
   | 'shop'
 
 export type AttributeKey =
@@ -140,7 +141,35 @@ export interface EquipmentConfig {
   rarity: Rarity
   cost: number
   bonuses: Partial<Record<AttributeKey, number>>
+  matchBonuses?: Partial<Record<'pass' | 'shot' | 'dribble' | 'control' | 'speed' | 'injuryResistance', number>>
+  trainingBonus?: Partial<Record<AttributeKey, number>>
+  recoveryBonus?: number
+  upgradeBaseCost?: number
+  upgradeGrowth?: number
   visual: string
+}
+
+export interface TrainingDrillConfig {
+  id: string
+  name: string
+  focus: string
+  description: string
+  attributes: Partial<Record<AttributeKey, number>>
+  energyCost: number
+  moneyCost: number
+  fatigue: number
+  animation: 'shoot' | 'dribble' | 'pass' | 'run' | 'header' | 'defense' | 'tactics' | 'recover'
+}
+
+export interface RecoveryOptionConfig {
+  id: string
+  name: string
+  description: string
+  cost: number
+  energyGain: number
+  fatigueReduction: number
+  moralGain: number
+  injuryRiskReduction: number
 }
 
 export interface SkillConfig {
@@ -190,6 +219,21 @@ export interface Resources {
   moral: number
 }
 
+export interface InjuryState {
+  active: boolean
+  label?: string
+  severity: number
+  matchesLeft: number
+}
+
+export interface PhysicalState {
+  fatigue: number
+  injuryRisk: number
+  injury: InjuryState
+  nextTrainingBoost: number
+  recoveryHistory: string[]
+}
+
 export interface PlayerProfile {
   created: boolean
   name: string
@@ -206,7 +250,95 @@ export interface PlayerProfile {
 export interface MatchEvent {
   minute: number
   text: string
-  kind: 'neutral' | 'good' | 'bad' | 'goal' | 'skill'
+  kind: 'neutral' | 'good' | 'bad' | 'goal' | 'skill' | 'debug'
+}
+
+export type MatchTeam = 'home' | 'away'
+export type MatchPlayerRole =
+  | 'goalkeeper'
+  | 'defender'
+  | 'midfielder'
+  | 'winger'
+  | 'striker'
+
+export type MatchPlayerState =
+  | 'Idle'
+  | 'Posicionando'
+  | 'Correndo para espaço'
+  | 'Recebendo passe'
+  | 'Conduzindo bola'
+  | 'Driblando'
+  | 'Preparando passe'
+  | 'Passando'
+  | 'Preparando chute'
+  | 'Chutando'
+  | 'Marcando'
+  | 'Tentando desarme'
+  | 'Interceptando passe'
+  | 'Recuando'
+  | 'Comemorando'
+  | 'Reagindo a gol'
+  | 'Recuperando fôlego'
+
+export interface Vec2 {
+  x: number
+  z: number
+}
+
+export interface MatchBallState {
+  position: Vec2
+  velocity: Vec2
+  angularVelocity: number
+  ownerId?: string
+  targetPlayerId?: string
+  lastTouchTeam?: MatchTeam
+  outOfBoundsTimer: number
+  stuckTimer: number
+}
+
+export interface MatchPlayerSim {
+  id: string
+  name: string
+  team: MatchTeam
+  role: MatchPlayerRole
+  state: MatchPlayerState
+  position: Vec2
+  velocity: Vec2
+  target: Vec2
+  homePosition: Vec2
+  facing: number
+  radius: number
+  maxSpeed: number
+  stamina: number
+  decisionCooldown: number
+  currentDecision: 'hold' | 'pass' | 'dribble' | 'shoot' | 'mark' | 'intercept'
+  debug: {
+    pass: number
+    shot: number
+    dribble: number
+    reason: string
+  }
+}
+
+export interface MatchEngineDebug {
+  ballSpeed: number
+  possession: string
+  playerState: MatchPlayerState
+  decision: string
+  passChance: number
+  shotChance: number
+  dribbleChance: number
+  lastError: string
+}
+
+export interface MatchEngineState {
+  tick: number
+  elapsedSeconds: number
+  aiTimer: number
+  ball: MatchBallState
+  players: MatchPlayerSim[]
+  debug: MatchEngineDebug
+  lastActionText: string
 }
 
 export interface ActiveMatch {
@@ -222,6 +354,7 @@ export interface ActiveMatch {
   momentum: number
   skillsUsed: number
   startedAt: number
+  engine: MatchEngineState
 }
 
 export interface MatchResult {
@@ -270,6 +403,8 @@ export interface OfflineSummary {
   money: number
   xp: number
   energy: number
+  fatigue: number
+  moral: number
   fame: number
   fans: number
 }
@@ -283,6 +418,7 @@ export interface GameState {
   activeSponsorId?: string
   sponsorMatchesLeft: number
   ownedEquipment: string[]
+  equipmentLevels: Record<string, number>
   equipped: Partial<Record<EquipmentConfig['slot'], string>>
   skillLevels: Record<string, number>
   completedMissions: string[]
@@ -292,6 +428,15 @@ export interface GameState {
   feed: string[]
   stats: CareerStats
   settings: SettingsState
+  physical: PhysicalState
+  lastTraining?: {
+    drill: string
+    quality: 'Normal' | 'Bom' | 'Ótimo' | 'Perfeito'
+    xp: number
+    fatigue: number
+    attributes: Partial<Record<AttributeKey, number>>
+    text: string
+  }
   lastSeen: number
   tutorialStep: number
   offlineSummary?: OfflineSummary

@@ -51,11 +51,21 @@ function SceneContent({ screen, state, ovr }: BrazukaSceneProps) {
       <Pitch screen={screen} />
       <Crowd count={crowdCount} />
       <Flags />
-      <PlayerFigure action={action} jerseyNumber={state.player.number} />
+      {screen !== 'match' && <PlayerFigure action={action} jerseyNumber={state.player.number} />}
       {screen === 'match' ? <MatchActors match={state.activeMatch} /> : <TrainingProps screen={screen} />}
-      <Float speed={2} rotationIntensity={0.18} floatIntensity={0.35}>
-        <Ball position={screen === 'match' ? [1.55, 0.18, -1.2] : [-1.1, 0.18, 0.4]} />
-      </Float>
+      {screen === 'match' && state.activeMatch?.engine ? (
+        <Ball
+          position={[
+            state.activeMatch.engine.ball.position.x,
+            0.18,
+            state.activeMatch.engine.ball.position.z,
+          ]}
+        />
+      ) : (
+        <Float speed={2} rotationIntensity={0.18} floatIntensity={0.35}>
+          <Ball position={[-1.1, 0.18, 0.4]} />
+        </Float>
+      )}
       <Confetti enabled={state.settings.graphics !== 'Baixa'} />
       <Text
         position={[0, 0.04, -3.05]}
@@ -300,25 +310,41 @@ function Ball({ position }: { position: [number, number, number] }) {
 }
 
 function MatchActors({ match }: { match?: ActiveMatch }) {
-  const minute = match?.minute ?? 0
-  const x = Math.sin(minute / 9) * 2.6
-  const z = Math.cos(minute / 11) * 1.6
+  const players = match?.engine?.players ?? []
 
   return (
     <group>
-      {[[-2.2, -0.8], [-1.25, 1.15], [2.45, -0.4]].map(([px, pz], index) => (
-        <MiniPlayer key={`${px}-${pz}`} position={[px + x * 0.08, 0.08, pz + z * 0.08]} color={index === 2 ? '#f25c54' : '#ffdd38'} />
-      ))}
-      {[1.55, 2.35, -1.75].map((px, index) => (
-        <MiniPlayer key={px} position={[px - x * 0.09, 0.08, -1.1 + index * 1.18]} color="#f25c54" />
+      {players.map((player) => (
+        <MiniPlayer
+          key={player.id}
+          position={[player.position.x, 0.08, player.position.z]}
+          color={player.team === 'home' ? '#ffdd38' : '#f25c54'}
+          state={player.state}
+        />
       ))}
     </group>
   )
 }
 
-function MiniPlayer({ position, color }: { position: [number, number, number]; color: string }) {
+function MiniPlayer({
+  position,
+  color,
+  state,
+}: {
+  position: [number, number, number]
+  color: string
+  state?: string
+}) {
+  const ref = useRef<THREE.Group>(null)
+
+  useFrame((frame) => {
+    if (!ref.current) return
+    const active = state === 'Driblando' || state === 'Chutando' || state === 'Correndo para espaço'
+    ref.current.position.y = Math.sin(frame.clock.elapsedTime * (active ? 7 : 2)) * (active ? 0.035 : 0.012)
+  })
+
   return (
-    <group position={position}>
+    <group ref={ref} position={position}>
       <mesh position={[0, 0.58, 0]}>
         <sphereGeometry args={[0.15, 12, 12]} />
         <meshStandardMaterial color="#8f5b38" />
@@ -327,6 +353,12 @@ function MiniPlayer({ position, color }: { position: [number, number, number]; c
         <capsuleGeometry args={[0.14, 0.35, 6, 10]} />
         <meshStandardMaterial color={color} />
       </mesh>
+      {state === 'Chutando' && (
+        <mesh position={[0.18, 0.1, -0.08]} rotation={[0.4, 0, 0.2]}>
+          <boxGeometry args={[0.1, 0.08, 0.32]} />
+          <meshStandardMaterial color="#ffffff" />
+        </mesh>
+      )}
     </group>
   )
 }

@@ -36,17 +36,21 @@ import {
   opponents,
   playStyles,
   positions,
+  recoveryOptions,
   rivals,
   skills,
   sponsors,
   strategies,
+  trainingDrills,
 } from './data/gameData'
 import { useGame } from './hooks/useGame'
 import {
   calculateEquipmentBonuses,
+  calculateLiveOvr,
   getEffectiveAttributes,
+  getEquipmentUpgradeCost,
   getProgressForMission,
-  getTrainingCost,
+  getRecoveryStatus,
   getXpForNextLevel,
 } from './utils/gameLogic'
 import type {
@@ -62,11 +66,12 @@ const navItems: { screen: Screen; label: string; icon: LucideIcon }[] = [
   { screen: 'match', label: 'Partida', icon: Play },
   { screen: 'career', label: 'Carreira', icon: Trophy },
   { screen: 'player', label: 'Jogador', icon: User },
+  { screen: 'recovery', label: 'Recuperar', icon: Activity },
   { screen: 'shop', label: 'Loja', icon: ShoppingBag },
 ]
 
 function App() {
-  const { state, ovr, actions } = useGame()
+  const { state, ovr, baseOvr, actions } = useGame()
   const [screen, setScreen] = useState<Screen>('home')
   const [strategy, setStrategy] = useState<StrategyKey>('balanced')
 
@@ -76,11 +81,11 @@ function App() {
 
   return (
     <main className="app-shell">
-      <TopHud state={state} ovr={ovr} />
+      <TopHud state={state} ovr={ovr} baseOvr={baseOvr} />
       <BrazukaScene screen={screen} state={state} ovr={ovr} />
       <section className="content-zone">
         {screen === 'home' && (
-          <HomeScreen state={state} ovr={ovr} goTo={setScreen} actions={actions} />
+          <HomeScreen state={state} ovr={ovr} baseOvr={baseOvr} goTo={setScreen} />
         )}
         {screen === 'training' && <TrainingScreen state={state} actions={actions} />}
         {screen === 'match' && (
@@ -94,6 +99,7 @@ function App() {
         )}
         {screen === 'career' && <CareerScreen state={state} ovr={ovr} />}
         {screen === 'player' && <PlayerScreen state={state} ovr={ovr} actions={actions} />}
+        {screen === 'recovery' && <RecoveryScreen state={state} actions={actions} />}
         {screen === 'shop' && <ShopScreen state={state} actions={actions} />}
       </section>
       <BottomNav screen={screen} setScreen={setScreen} />
@@ -249,6 +255,7 @@ function createPreviewState(): GameState {
     careerStage: 0,
     sponsorMatchesLeft: 0,
     ownedEquipment: [],
+    equipmentLevels: {},
     equipped: {},
     skillLevels: {},
     completedMissions: [],
@@ -274,14 +281,22 @@ function createPreviewState(): GameState {
       fameEarned: 0,
     },
     settings: { music: true, sound: true, graphics: 'Média', language: 'Português' },
+    physical: {
+      fatigue: 12,
+      injuryRisk: 6,
+      injury: { active: false, severity: 0, matchesLeft: 0 },
+      nextTrainingBoost: 0,
+      recoveryHistory: [],
+    },
     lastSeen: Date.now(),
     tutorialStep: 0,
   }
 }
 
-function TopHud({ state, ovr }: { state: GameState; ovr: number }) {
+function TopHud({ state, ovr, baseOvr }: { state: GameState; ovr: number; baseOvr: number }) {
   const xpTarget = getXpForNextLevel(state.player.level)
   const xpPercent = Math.min(100, Math.round((state.player.xp / xpTarget) * 100))
+  const recovery = getRecoveryStatus(state)
 
   return (
     <header className="top-hud">
@@ -291,8 +306,11 @@ function TopHud({ state, ovr }: { state: GameState; ovr: number }) {
       </div>
       <div className="hud-scroll">
         <HudPill icon={Award} label="Nível" value={`${state.player.level}`} />
-        <HudPill icon={Target} label="OVR" value={ovr.toString()} />
+        <HudPill icon={Target} label="OVR Atual" value={`${ovr}`} />
+        <HudPill icon={Shield} label="OVR Base" value={`${baseOvr}`} />
         <HudPill icon={Zap} label="Energia" value={`${state.resources.energy}/${state.resources.maxEnergy}`} />
+        <HudPill icon={Activity} label="Fadiga" value={`${state.physical.fatigue}%`} />
+        <HudPill icon={Heart} label="Condição" value={recovery.label} />
         <HudPill icon={Coins} label="RB" value={formatNumber(state.resources.money)} />
         <HudPill icon={Star} label="Fama" value={formatNumber(state.resources.fame)} />
         <HudPill icon={Heart} label="Torcida" value={formatNumber(state.resources.fans)} />
@@ -317,18 +335,19 @@ function HudPill({ icon: Icon, label, value }: { icon: LucideIcon; label: string
 function HomeScreen({
   state,
   ovr,
+  baseOvr,
   goTo,
-  actions,
 }: {
   state: GameState
   ovr: number
+  baseOvr: number
   goTo: (screen: Screen) => void
-  actions: ReturnType<typeof useGame>['actions']
 }) {
   const currentStage = careerStages[state.careerStage]
   const nextStage = careerStages[state.careerStage + 1]
   const nextOpponent = getNextOpponent(state)
   const sponsor = sponsors.find((item) => item.id === state.activeSponsorId)
+  const recovery = getRecoveryStatus(state)
 
   return (
     <div className="screen-flow">
@@ -341,15 +360,20 @@ function HomeScreen({
           </p>
         </div>
         <div className="ovr-badge">
-          <span>OVR Brazuka</span>
+          <span>OVR Atual</span>
           <strong>{ovr}</strong>
+          <small>Base {baseOvr}</small>
         </div>
       </section>
 
       <section className="quick-grid">
         <MetricCard icon={Zap} label="Energia" value={`${state.resources.energy}/${state.resources.maxEnergy}`} />
+        <MetricCard icon={Activity} label="Fadiga" value={`${state.physical.fatigue}%`} />
+        <MetricCard icon={Shield} label="Condição" value={recovery.label} />
+        <MetricCard icon={Heart} label="Risco lesão" value={`${recovery.injuryRisk}%`} />
         <MetricCard icon={Coins} label="Reais Brazuka" value={formatNumber(state.resources.money)} />
         <MetricCard icon={Star} label="Fama" value={formatNumber(state.resources.fame)} />
+        <MetricCard icon={Target} label="Recomendação" value={recovery.recommendation} />
         <MetricCard icon={Heart} label="Torcida" value={formatNumber(state.resources.fans)} />
       </section>
 
@@ -366,7 +390,7 @@ function HomeScreen({
           <Trophy size={18} />
           Copa
         </button>
-        <button onClick={actions.rest}>
+        <button onClick={() => goTo('recovery')}>
           <Activity size={18} />
           Recuperar
         </button>
@@ -428,61 +452,64 @@ function TrainingScreen({
 }) {
   const effective = getEffectiveAttributes(state)
   const bonuses = calculateEquipmentBonuses(state)
-  const grouped = groupAttributes()
+  const recovery = getRecoveryStatus(state)
 
   return (
     <div className="screen-flow">
-      <SectionTitle eyebrow="Centro de Treinamento" title="Evolução do craque" />
-      {Object.entries(grouped).map(([group, attributes]) => (
-        <section className="training-group" key={group}>
-          <h3>{group}</h3>
-          <div className="training-grid">
-            {attributes.map((attribute) => {
-              const value = state.attributes[attribute.key]
-              const bonus = bonuses[attribute.key] ?? 0
-              const cost = getTrainingCost(state, attribute.key)
-              const disabled = state.resources.money < cost || state.resources.energy < attribute.energyCost || value >= 99
+      <SectionTitle eyebrow="Centro de Treinamento" title="Treinos com resultado real" />
+      <section className="quick-grid">
+        <MetricCard icon={Zap} label="Energia" value={`${state.resources.energy}/${state.resources.maxEnergy}`} />
+        <MetricCard icon={Activity} label="Fadiga" value={`${state.physical.fatigue}%`} />
+        <MetricCard icon={Shield} label="Condição" value={recovery.label} />
+        <MetricCard icon={Heart} label="Próximo treino" value={state.physical.nextTrainingBoost > 0 ? '+16% nutrição' : recovery.recommendation} />
+      </section>
 
-              return (
-                <article className="training-card" key={attribute.key}>
-                  <div className="card-head">
-                    <span className="attribute-chip" style={{ background: attribute.color }}>
-                      {attribute.short}
-                    </span>
-                    <div>
-                      <strong>{attribute.label}</strong>
-                      <span>{attribute.description}</span>
-                    </div>
-                  </div>
-                  <div className="attribute-value">
-                    <strong>{effective[attribute.key]}</strong>
-                    {bonus > 0 && <span>+{bonus} equipamento</span>}
-                  </div>
-                  <ProgressBar value={(value / 99) * 100} />
-                  <div className="cost-row">
-                    <span>{formatNumber(cost)} RB</span>
-                    <span>{attribute.energyCost} energia</span>
-                  </div>
-                  <div className="button-row">
-                    <button title="Treinar uma vez" disabled={disabled} onClick={() => actions.train(attribute.key, 1)}>
-                      <Dumbbell size={16} />
-                      1x
-                    </button>
-                    <button title="Treinar dez vezes" disabled={disabled} onClick={() => actions.train(attribute.key, 10)}>
-                      <Zap size={16} />
-                      10x
-                    </button>
-                    <button title="Treinar o máximo possível" disabled={disabled} onClick={() => actions.train(attribute.key, 'max')}>
-                      <Target size={16} />
-                      Max
-                    </button>
-                  </div>
-                </article>
-              )
-            })}
-          </div>
+      {state.lastTraining && (
+        <section className="training-feedback">
+          <strong>{state.lastTraining.text}</strong>
+          <span>XP +{state.lastTraining.xp} · Fadiga +{state.lastTraining.fatigue}</span>
         </section>
-      ))}
+      )}
+
+      <section className="training-grid">
+        {trainingDrills.map((drill) => {
+          const disabled =
+            state.resources.money < drill.moneyCost ||
+            state.resources.energy < drill.energyCost ||
+            state.physical.injury.active
+          const affected = Object.entries(drill.attributes)
+            .map(([key, weight]) => {
+              const attribute = attributesConfig.find((item) => item.key === key)
+              const bonus = bonuses[key as keyof typeof bonuses] ?? 0
+              return `${attribute?.label ?? key} ${effective[key as keyof typeof effective]}${bonus ? ` (+${Math.round(bonus)})` : ''} x${weight}`
+            })
+            .join(' · ')
+
+          return (
+            <article className="training-card drill-card" key={drill.id}>
+              <div className="card-head">
+                <span className="attribute-chip">
+                  {drill.focus.slice(0, 3).toUpperCase()}
+                </span>
+                <div>
+                  <strong>{drill.name}</strong>
+                  <span>{drill.description}</span>
+                </div>
+              </div>
+              <p>{affected}</p>
+              <div className="cost-row">
+                <span>{formatNumber(drill.moneyCost)} RB</span>
+                <span>{drill.energyCost} energia</span>
+                <span>+{drill.fatigue} fadiga</span>
+              </div>
+              <button disabled={disabled} onClick={() => actions.trainDrill(drill.id)}>
+                <Dumbbell size={16} />
+                Treinar
+              </button>
+            </article>
+          )
+        })}
+      </section>
     </div>
   )
 }
@@ -516,6 +543,8 @@ function MatchScreen({
 
   if (match?.status === 'running') {
     const manualSkills = skills.filter((skill) => skill.type === 'manual')
+    const recovery = getRecoveryStatus(state)
+    const debug = match.engine.debug
 
     return (
       <div className="screen-flow">
@@ -532,6 +561,13 @@ function MatchScreen({
             <span>{opponent.name}</span>
             <strong>{match.scoreAgainst}</strong>
           </div>
+        </section>
+
+        <section className="match-context">
+          <span>Energia {state.resources.energy}/{state.resources.maxEnergy}</span>
+          <span>Condição {recovery.label}</span>
+          <span>Moral {state.resources.moral}</span>
+          <span>Posse {debug.possession}</span>
         </section>
 
         <section className="skill-dock">
@@ -556,6 +592,12 @@ function MatchScreen({
         </section>
 
         <section className="event-feed">
+          <div className="event-line debug">
+            <span>DBG</span>
+            <strong>
+              Bola {debug.ballSpeed} · {debug.playerState} · decisão {debug.decision} · passe {debug.passChance}% · chute {debug.shotChance}% · drible {debug.dribbleChance}%
+            </strong>
+          </div>
           {match.events
             .slice()
             .reverse()
@@ -590,6 +632,11 @@ function MatchScreen({
             <strong>OVR {opponent.ovr}</strong>
           </div>
         </div>
+        <div className="match-context">
+          <span>Fadiga {state.physical.fatigue}%</span>
+          <span>Condição {getRecoveryStatus(state).label}</span>
+          <span>Risco lesão {getRecoveryStatus(state).injuryRisk}%</span>
+        </div>
         <div className="strategy-grid">
           {strategies.map((item) => (
             <button
@@ -605,7 +652,7 @@ function MatchScreen({
         <p className="strategy-copy">{strategies.find((item) => item.key === strategy)?.description}</p>
         <button
           className="primary-action"
-          disabled={state.resources.energy < 15}
+          disabled={state.resources.energy < 15 || state.physical.injury.active}
           onClick={() => actions.startMatch(strategy)}
         >
           <Play size={18} />
@@ -739,12 +786,40 @@ function PlayerScreen({
           <div className="equipment-list">
             {ownedItems.map((item) => {
               const equipped = state.equipped[item.slot] === item.id
+              const level = state.equipmentLevels[item.id] ?? 1
+              const upgradeCost = getEquipmentUpgradeCost(state, item.id)
+              const beforeOvr = calculateLiveOvr(state)
+              const previewState = {
+                ...state,
+                equipmentLevels: {
+                  ...state.equipmentLevels,
+                  [item.id]: level + 1,
+                },
+              }
+              const afterOvr = calculateLiveOvr(previewState)
+              const itemBonuses = Object.entries(item.bonuses)
+                .map(([key, value]) => {
+                  const attribute = attributesConfig.find((candidate) => candidate.key === key)
+                  return `+${Math.round(value * (1 + (level - 1) * (item.upgradeGrowth ?? 0.16)))} ${attribute?.label ?? key}`
+                })
+                .join(' · ')
               return (
-                <button key={item.id} className={clsx(equipped && 'selected')} onClick={() => actions.equipItem(item.id)}>
-                  <span>{item.slot}</span>
-                  <strong>{item.name}</strong>
-                  <small>{item.rarity}</small>
-                </button>
+                <article key={item.id} className={clsx('equipment-card', equipped && 'selected')}>
+                  <button onClick={() => actions.equipItem(item.id)}>
+                    <span>{item.slot} · Nv {level}</span>
+                    <strong>{item.name}</strong>
+                    <small>{item.rarity}</small>
+                  </button>
+                  <p>{itemBonuses}</p>
+                  <small>OVR ao upar: {beforeOvr} → {afterOvr}</small>
+                  <button
+                    disabled={state.resources.money < upgradeCost || level >= 10}
+                    onClick={() => actions.upgradeEquipment(item.id)}
+                  >
+                    <Sparkles size={15} />
+                    Upar {formatNumber(upgradeCost)}
+                  </button>
+                </article>
               )
             })}
           </div>
@@ -780,6 +855,60 @@ function PlayerScreen({
           <FeedList feed={state.feed} />
         </InfoPanel>
       </section>
+    </div>
+  )
+}
+
+function RecoveryScreen({
+  state,
+  actions,
+}: {
+  state: GameState
+  actions: ReturnType<typeof useGame>['actions']
+}) {
+  const recovery = getRecoveryStatus(state)
+
+  return (
+    <div className="screen-flow">
+      <SectionTitle eyebrow="Recuperação" title="Condição física" />
+      <section className="quick-grid">
+        <MetricCard icon={Zap} label="Energia" value={`${state.resources.energy}/${state.resources.maxEnergy}`} />
+        <MetricCard icon={Activity} label="Fadiga" value={`${state.physical.fatigue}%`} />
+        <MetricCard icon={Shield} label="Condição" value={recovery.label} />
+        <MetricCard icon={Heart} label="Risco de lesão" value={`${recovery.injuryRisk}%`} />
+      </section>
+
+      <section className="recovery-alert">
+        <strong>{recovery.recommendation}</strong>
+        <span>Recuperação natural estimada: {recovery.estimatedNaturalMinutes} min de jogo offline.</span>
+        {state.physical.injury.active && (
+          <span>Lesão ativa: {state.physical.injury.label} · severidade {state.physical.injury.severity}</span>
+        )}
+      </section>
+
+      <section className="recovery-grid">
+        {recoveryOptions.map((option) => (
+          <article className="recovery-card" key={option.id}>
+            <div>
+              <strong>{option.name}</strong>
+              <span>{option.description}</span>
+            </div>
+            <div className="cost-row">
+              <span>{formatNumber(option.cost)} RB</span>
+              <span>+{option.energyGain} energia</span>
+              <span>-{option.fatigueReduction} fadiga</span>
+            </div>
+            <button disabled={state.resources.money < option.cost} onClick={() => actions.recover(option.id)}>
+              <Activity size={16} />
+              Aplicar
+            </button>
+          </article>
+        ))}
+      </section>
+
+      <InfoPanel title="Histórico" icon={Clock}>
+        <FeedList feed={state.physical.recoveryHistory.length ? state.physical.recoveryHistory : ['Nenhuma recuperação feita ainda.']} />
+      </InfoPanel>
     </div>
   )
 }
@@ -1032,6 +1161,8 @@ function OfflineModal({
           <MetricCard icon={Coins} label="RB" value={`+${formatNumber(summary.money)}`} />
           <MetricCard icon={Award} label="XP" value={`+${formatNumber(summary.xp)}`} />
           <MetricCard icon={Zap} label="Energia" value={`+${formatNumber(summary.energy)}`} />
+          <MetricCard icon={Activity} label="Fadiga" value={`-${formatNumber(summary.fatigue)}`} />
+          <MetricCard icon={Heart} label="Moral" value={`+${formatNumber(summary.moral)}`} />
           <MetricCard icon={Star} label="Fama" value={`+${formatNumber(summary.fame)}`} />
         </div>
         <button className="primary-action" onClick={actions.dismissOffline}>
@@ -1040,17 +1171,6 @@ function OfflineModal({
         </button>
       </section>
     </div>
-  )
-}
-
-function groupAttributes() {
-  return attributesConfig.reduce(
-    (groups, attribute) => {
-      groups[attribute.group] = groups[attribute.group] ?? []
-      groups[attribute.group].push(attribute)
-      return groups
-    },
-    {} as Record<string, typeof attributesConfig>,
   )
 }
 
